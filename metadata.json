@@ -1,0 +1,6 @@
+{
+  "name": "Arcadia System",
+  "description": "AI-assisted development orchestration and governance system for structured, validated software execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
