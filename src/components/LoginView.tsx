@@ -150,7 +150,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         <div className="hidden lg:flex px-6 py-3 border-t border-slate-900 bg-slate-950/80 backdrop-blur-sm items-center justify-between text-xs text-slate-400">
           <div className="flex items-center space-x-2">
             <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Interactive 3D Spatial Geometry · Authoritative Core & Governance Rings</span>
+            <span>Interactive Architectural Lattice · Reactive Cursor Field</span>
           </div>
           <div className="flex items-center space-x-3 font-mono text-[11px] text-slate-500">
             <span>SOC2 TYPE II</span>
