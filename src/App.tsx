@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from './lib/api.ts';
 import { Header } from './components/Header.tsx';
 import { Sidebar, ViewTab } from './components/Sidebar.tsx';
 import { LoginView } from './components/LoginView.tsx';
@@ -92,7 +93,7 @@ export function App() {
   // 2. Fetch Projects
   const fetchProjects = useCallback(async () => {
     try {
-      const res = await fetch('/api/projects');
+      const res = await apiFetch('/api/projects');
       if (!res.ok) return;
       const data: Project[] = await res.json();
       setProjects(data);
@@ -208,6 +209,7 @@ export function App() {
       });
       const data = await res.json();
       if (data.success) {
+        if (data.token) localStorage.setItem('arcadia_session_token', data.token);
         setCurrentUser(data.user);
         if (currentProjectId) fetchProjectData(currentProjectId);
       }
@@ -217,7 +219,7 @@ export function App() {
   };
 
   const handleCreateProject = async (data: { name: string; slug: string; description: string; complexityLevel: ProjectComplexity }) => {
-    const res = await fetch('/api/projects', {
+    const res = await apiFetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -392,7 +394,7 @@ export function App() {
   };
 
   const handleRunTests = async () => {
-    const res = await fetch('/api/tests/run', { method: 'POST' });
+    const res = await apiFetch('/api/tests/run', { method: 'POST' });
     return await res.json();
   };
 

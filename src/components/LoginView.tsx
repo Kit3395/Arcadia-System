@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Arcadia3DScene } from './Arcadia3DScene.tsx';
-import { Shield, Lock, Key, ArrowRight, UserCheck, CheckCircle2, ShieldAlert, Cpu } from 'lucide-react';
+import React, { useState, Suspense, lazy } from 'react';
+const Arcadia3DScene = lazy(() => import('./Arcadia3DScene.tsx').then(m => ({ default: m.Arcadia3DScene })));
+import { Shield, Lock, Key, ArrowRight, CheckCircle2, ShieldAlert, Cpu } from 'lucide-react';
 import { User, Organization } from '../types/index.ts';
 
 interface CorporatePersonnel {
@@ -19,9 +19,8 @@ interface LoginViewProps {
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [selectedPersonnelId, setSelectedPersonnelId] = useState<string>('usr-lead');
-  const [accessKey, setAccessKey] = useState<string>('Arcadia-Gov-2026!');
-  const [mfaCode, setMfaCode] = useState<string>('');
-  const [useHardwareKey, setUseHardwareKey] = useState<boolean>(true);
+  // Access keys are never prefilled — each operator enters their own key.
+  const [accessKey, setAccessKey] = useState<string>('');
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -87,15 +86,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const handlePersonnelSelect = (personnel: CorporatePersonnel) => {
     setSelectedPersonnelId(personnel.id);
     setErrorMessage(null);
-    switch (personnel.role) {
-      case 'PROJECT_LEAD': setAccessKey('Arcadia-Gov-2026!'); break;
-      case 'ARCHITECT': setAccessKey('Arcadia-Arch-2026!'); break;
-      case 'SECURITY': setAccessKey('Arcadia-SecOps-2026!'); break;
-      case 'DEVELOPER': setAccessKey('Arcadia-Dev-2026!'); break;
-      case 'OPERATIONS': setAccessKey('Arcadia-Ops-2026!'); break;
-      case 'CLIENT': setAccessKey('Arcadia-Audit-2026!'); break;
-      default: setAccessKey('Arcadia-Auth-2026!');
-    }
+    // Never auto-fill access keys — the operator must enter their own.
+    setAccessKey('');
   };
 
   const handleAuthenticate = async (e?: React.FormEvent) => {
@@ -110,8 +102,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         body: JSON.stringify({
           userId: activePersonnel.id,
           email: activePersonnel.email,
-          accessKey,
-          mfaToken: useHardwareKey ? 'FIDO2_HARDWARE_KEY_AUTHENTICATED' : mfaCode
+          accessKey
         })
       });
 
@@ -148,9 +139,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           </div>
         </div>
 
-        {/* 3D Scene Viewport */}
+        {/* 3D Scene Viewport — lazy-loaded so the login form renders instantly */}
         <div className="flex-1 w-full h-full relative">
-          <Arcadia3DScene className="w-full h-full" />
+          <Suspense fallback={<div className="w-full h-full bg-slate-950 animate-pulse" />}>
+            <Arcadia3DScene className="w-full h-full" />
+          </Suspense>
         </div>
 
         {/* Bottom Explanatory Strip */}
@@ -272,20 +265,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 />
                 <Key className="w-4 h-4 text-slate-500 absolute right-3.5 top-3" />
               </div>
-            </div>
-
-            {/* Hardware Key / MFA */}
-            <div className="flex items-center justify-between p-2.5 rounded-lg border border-slate-800/80 bg-slate-900/30">
-              <div className="flex items-center space-x-2">
-                <UserCheck className="w-4 h-4 text-emerald-400" />
-                <span className="text-xs text-slate-300">FIDO2 Hardware Key Authenticated</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={useHardwareKey}
-                onChange={(e) => setUseHardwareKey(e.target.checked)}
-                className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-slate-800 cursor-pointer"
-              />
             </div>
 
             {errorMessage && (

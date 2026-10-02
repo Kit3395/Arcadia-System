@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '../lib/api.ts';
 import {
   Cpu,
   Play,
@@ -63,7 +64,7 @@ export const ExecutionView: React.FC<ExecutionViewProps> = ({
   // 1. Fetch Agents
   const fetchAgents = useCallback(async () => {
     try {
-      const res = await fetch('/api/agents');
+      const res = await apiFetch('/api/agents');
       if (res.ok) {
         const data: AgentProfile[] = await res.json();
         setAgents(data);

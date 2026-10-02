@@ -9,8 +9,8 @@ import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './src/server/api.ts';
 import { correlationAndAuthMiddleware } from './src/server/auth.ts';
 
-const PORT = 3000;
-const HOST = '0.0.0.0';
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '0.0.0.0';
 
 async function startServer() {
   const app = express();

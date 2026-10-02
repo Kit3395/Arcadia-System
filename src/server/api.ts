@@ -68,6 +68,47 @@ export interface CorporatePersonnel {
   department: string;
 }
 
+// ---------------------------------------------------------------------------
+// Access-key authentication.
+// Per-personnel access keys are configured via the ARCADIA_ACCESS_KEYS
+// environment variable as a JSON object: { "<userId>": "<secret>", ... }.
+// In AI Studio, set this via the Secrets panel. Keys are compared by SHA-256
+// hash with a timing-safe comparison so plaintext secrets never linger.
+// If unset in non-production, a single DEMO key is accepted and a loud
+// warning is logged. In production with no keys configured, login is refused.
+// ---------------------------------------------------------------------------
+import crypto from 'node:crypto';
+
+const DEMO_ACCESS_KEY = 'Arcadia-Demo-2026!';
+
+let CONFIGURED_ACCESS_KEYS: Map<string, string> | null = null;
+try {
+  const raw = process.env.ARCADIA_ACCESS_KEYS;
+  if (raw) {
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    CONFIGURED_ACCESS_KEYS = new Map(
+      Object.entries(parsed).filter(([, v]) => typeof v === 'string' && v.length > 0)
+    );
+    console.log(`[SECURITY] Loaded ${CONFIGURED_ACCESS_KEYS.size} personnel access key(s) from ARCADIA_ACCESS_KEYS.`);
+  }
+} catch (err) {
+  console.error('[SECURITY] Failed to parse ARCADIA_ACCESS_KEYS — access-key auth is disabled until it is valid JSON.', err);
+}
+
+if (!CONFIGURED_ACCESS_KEYS && process.env.NODE_ENV !== 'production') {
+  console.warn('[SECURITY] ARCADIA_ACCESS_KEYS is not set. Accepting the DEMO access key — NOT safe for production. Set the ARCADIA_ACCESS_KEYS secret before deploying.');
+}
+
+function isAccessKeyValid(userId: string, providedKey: unknown): boolean {
+  if (typeof providedKey !== 'string' || providedKey.length === 0) return false;
+  const expected = CONFIGURED_ACCESS_KEYS?.get(userId)
+    ?? (process.env.NODE_ENV === 'production' ? null : DEMO_ACCESS_KEY);
+  if (!expected) return false;
+  const a = crypto.createHash('sha256').update(providedKey, 'utf8').digest();
+  const b = crypto.createHash('sha256').update(expected, 'utf8').digest();
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 const ALLOWED_CORPORATE_PERSONNEL: CorporatePersonnel[] = [
   {
     id: 'usr-lead',
@@ -158,6 +199,26 @@ apiRouter.post('/auth/login', (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
+  // Access key is mandatory and actually verified — knowing an email or
+  // userId alone is not enough to authenticate.
+  if (!isAccessKeyValid(candidate.id, accessKey)) {
+    storage.recordAudit({
+      actorId: 'anonymous',
+      actorRole: 'ANONYMOUS' as any,
+      action: 'FAILED_LOGIN_ATTEMPT',
+      targetEntity: 'Authentication',
+      targetId: email || userId || 'unknown',
+      afterState: { attemptedIdentifier: email || userId, reason: 'INVALID_ACCESS_KEY', ip: req.ip },
+      correlationId: req.correlationId || 'unknown'
+    });
+
+    res.status(401).json({
+      error: 'INVALID_CREDENTIALS',
+      message: 'Access denied: invalid corporate access key for the selected personnel.'
+    });
+    return;
+  }
+
   // Issue session token and bind user
   const token = createSessionToken(candidate.id);
   const user = storage.getUser(candidate.id);
@@ -209,7 +270,7 @@ apiRouter.post('/auth/logout', (req: AuthenticatedRequest, res: Response) => {
   res.json({ success: true, message: 'Logged out successfully.' });
 });
 
-apiRouter.post('/auth/lockdown', (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/auth/lockdown', requireAuth, requirePermission('admin.config'), (req: AuthenticatedRequest, res: Response) => {
   setSystemLockdown(true);
 
   storage.recordAudit({
@@ -247,7 +308,7 @@ apiRouter.get('/auth/session', (req: AuthenticatedRequest, res: Response) => {
   });
 });
 
-apiRouter.post('/auth/switch-role', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/auth/switch-role', requireAuth, requirePermission('admin.config'), (req: AuthenticatedRequest, res: Response) => {
   const { userId } = req.body;
   if (!userId) {
     res.status(400).json({ error: 'MISSING_USER_ID', message: 'userId is required' });
@@ -261,19 +322,23 @@ apiRouter.post('/auth/switch-role', requireAuth, (req: AuthenticatedRequest, res
   }
 
   const user = storage.getUser(userId);
+  // Issue a fresh session token for the target user so subsequent Bearer-token
+  // requests are identified as the switched-to user, not the original caller.
+  const newToken = createSessionToken(userId);
   storage.recordAudit({
-    actorId: userId,
-    actorRole: user!.role,
+    actorId: req.user!.id,
+    actorRole: req.user!.role,
     action: 'SESSION_ROLE_SWITCHED',
     targetEntity: 'User',
     targetId: userId,
-    afterState: { role: user!.role },
+    afterState: { role: user!.role, switchedBy: req.user!.id },
     correlationId: req.correlationId || 'unknown'
   });
 
   res.json({
     success: true,
     user,
+    token: newToken,
     message: `Switched active preview role to ${user?.role} (${user?.fullName})`
   });
 });
@@ -1947,6 +2012,13 @@ apiRouter.post('/projects/:id/assurance/proposals/:propId/ratify', requireAuth, 
 // ============================================================================
 
 apiRouter.post('/tests/run', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  // Run invariant suites against an isolated snapshot so test writes
+  // (test projects, requirements, audit entries) never pollute real data.
+  const snapshot = storage.snapshotState();
+  let passed = false;
+  let allResults: any[] = [];
+  let summary = { total: 0, passed: 0, failed: 0 };
+  try {
   const { runFoundationTests } = await import('../tests/foundation.test.ts');
   const { runExecutionTests } = await import('../tests/execution.test.ts');
   const { runCollaborationTests } = await import('../tests/collaboration.test.ts');
@@ -1969,7 +2041,7 @@ apiRouter.post('/tests/run', requireAuth, async (req: AuthenticatedRequest, res:
   const operations = await runOperationsTests();
   const assurance = await runAssuranceTests();
   
-  const allResults = [
+  allResults = [
     ...foundation.results,
     ...execution.results,
     ...collaboration.results.map((r: any) => ({
@@ -2029,15 +2101,28 @@ apiRouter.post('/tests/run', requireAuth, async (req: AuthenticatedRequest, res:
       durationMs: 6
     }))
   ];
-  const passed = foundation.passed && execution.passed && collaboration.passed && validation.passed && optimization.passed && learning.passed && resilience.passed && integration.passed && operations.passed && assurance.passed;
-  
-  res.json({
-    passed,
-    results: allResults,
-    summary: {
-      total: allResults.length,
-      passed: allResults.filter(r => r.passed).length,
-      failed: allResults.filter(r => !r.passed).length
-    }
+  passed = foundation.passed && execution.passed && collaboration.passed && validation.passed && optimization.passed && learning.passed && resilience.passed && integration.passed && operations.passed && assurance.passed;
+
+  summary = {
+    total: allResults.length,
+    passed: allResults.filter(r => r.passed).length,
+    failed: allResults.filter(r => !r.passed).length
+  };
+  } finally {
+    // Roll back all test writes; only the audit entry below survives.
+    storage.restoreState(snapshot);
+  }
+
+  // Record the test run itself in the audit ledger (after the restore).
+  storage.recordAudit({
+    actorId: req.user!.id,
+    actorRole: req.user!.role,
+    action: 'INVARIANT_TEST_SUITE_EXECUTED',
+    targetEntity: 'TestRunner',
+    targetId: 'full-suite',
+    afterState: { ...summary },
+    correlationId: req.correlationId || 'unknown'
   });
+
+  res.json({ passed, results: allResults, summary });
 });

@@ -425,6 +425,52 @@ export class StorageEngine {
   }
 
   // ==========================================================================
+  // TEST ISOLATION — snapshot & restore the entire in-memory store.
+  // The /api/tests/run endpoint wraps execution in snapshotState/restoreState
+  // so invariant suites never pollute real user data (test projects, audit
+  // entries, etc. are rolled back after the run).
+  // ==========================================================================
+  private static readonly SNAPSHOT_FIELDS: readonly string[] = [
+    'organizations', 'users', 'projects', 'constitutions', 'requirements',
+    'decisions', 'tasks', 'decisionQueue', 'auditLogs', 'validationContracts',
+    'validationRules', 'validationGates', 'securityFindings', 'threatModels',
+    'trustBoundaries', 'dataFlows', 'complianceControls', 'securityIncidents',
+    'driftRecords', 'regressionRuns', 'riskAcceptances', 'telemetryEvents',
+    'costEvents', 'costModels', 'costEstimates', 'timeEvents', 'trustEvents',
+    'optimizationRecommendations', 'optimizationPolicies', 'optimizationActions',
+    'optimizationExperiments', 'organizationalMemories', 'detectedPatterns',
+    'learningMetricSnapshots', 'evolutionProposals', 'circuitBreakers',
+    'deadLetterQueue', 'deployments', 'backups', 'restoreTests', 'incidents',
+    'secretFindings', 'runbooks', 'degradationLevels', 'aiProviders',
+  ];
+
+  snapshotState(): Map<string, unknown> {
+    const snap = new Map<string, unknown>();
+    const self = this as unknown as Record<string, unknown>;
+    for (const field of StorageEngine.SNAPSHOT_FIELDS) {
+      const value = self[field];
+      if (value instanceof Map) {
+        snap.set(field, new Map(structuredClone(Array.from(value.entries()))));
+      } else if (Array.isArray(value)) {
+        snap.set(field, structuredClone(value));
+      }
+    }
+    return snap;
+  }
+
+  restoreState(snap: Map<string, unknown>): void {
+    const self = this as unknown as Record<string, unknown>;
+    for (const field of StorageEngine.SNAPSHOT_FIELDS) {
+      const value = snap.get(field);
+      if (value instanceof Map) {
+        self[field] = new Map(value);
+      } else if (Array.isArray(value)) {
+        self[field] = [...value];
+      }
+    }
+  }
+
+  // ==========================================================================
   // IDENTITY & ORGANIZATION (Tenant Boundary)
   // ==========================================================================
 

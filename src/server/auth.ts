@@ -100,8 +100,10 @@ export function correlationAndAuthMiddleware(req: AuthenticatedRequest, res: Res
     }
   }
 
-  // Fallback to explicit header override (for testing) or active preview session
-  if (!identifiedUserId) {
+  // Non-production fallbacks: explicit header override (for testing) or the
+  // single active preview session. In production, ONLY a valid Bearer session
+  // token identifies a user — no header impersonation, no shared global session.
+  if (!identifiedUserId && process.env.NODE_ENV !== 'production') {
     const headerUserId = req.headers['x-arcadia-user-id'] as string;
     identifiedUserId = headerUserId || activeUserId;
   }

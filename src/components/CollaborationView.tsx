@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '../lib/api.ts';
 import {
   Users,
   Play,
@@ -86,8 +87,8 @@ export const CollaborationView: React.FC<CollaborationViewProps> = ({
   const fetchAgentsAndSignatures = useCallback(async () => {
     try {
       const [resAgents, resSigs] = await Promise.all([
-        fetch('/api/agents'),
-        fetch('/api/agents-meta/failure-signatures')
+        apiFetch('/api/agents'),
+        apiFetch('/api/agents-meta/failure-signatures')
       ]);
 
       if (resAgents.ok) {
