@@ -5,42 +5,38 @@
 
 import express from 'express';
 import path from 'path';
-import fs from 'node:fs';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './src/server/api.ts';
 import { correlationAndAuthMiddleware } from './src/server/auth.ts';
 import { storage } from './src/server/storage.ts';
+import { createSnapshotStore } from './src/server/snapshotStore.ts';
 
 // Load local .env if present (no-op when real env vars are injected,
 // e.g. AI Studio secrets — dotenv never overrides existing values).
 dotenv.config();
 
 // ---------------------------------------------------------------------------
-// File persistence: the in-memory store is snapshotted to disk periodically
-// and on shutdown, and restored on boot when a snapshot exists.
-// NOTE: on Cloud Run the filesystem is ephemeral per instance, so this
-// protects against process restarts, not instance replacement. A managed
-// database remains the right choice for production-critical data.
+// Durable state: the in-memory store is snapshotted through a SnapshotStore
+// (Turso when TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are set, otherwise a
+// local JSON file). Restored on boot, saved every 60s and on shutdown.
 // ---------------------------------------------------------------------------
-const DATA_FILE = process.env.ARCADIA_DATA_FILE || path.join(process.cwd(), 'arcadia-data.json');
+const snapshotStore = createSnapshotStore();
 
-function persistState(): void {
+async function restoreState(): Promise<void> {
+  const raw = await snapshotStore.load();
+  if (!raw) return; // nothing stored yet — keep seed data
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(storage.toJSON()));
+    storage.loadJSON(JSON.parse(raw) as Record<string, unknown>);
+    console.log(`[STORAGE] Restored persisted state via ${snapshotStore.name}.`);
   } catch (err) {
-    console.error(`[STORAGE] Failed to persist state to ${DATA_FILE}:`, (err as Error)?.message || err);
+    console.error('[STORAGE] Snapshot parse failed — starting from seed data:', (err as Error)?.message || err);
   }
 }
 
-function restoreState(): void {
-  try {
-    if (!fs.existsSync(DATA_FILE)) return;
-    storage.loadJSON(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) as Record<string, unknown>);
-    console.log(`[STORAGE] Restored persisted state from ${DATA_FILE}.`);
-  } catch (err) {
-    console.error(`[STORAGE] Failed to restore ${DATA_FILE} — starting from seed data:`, (err as Error)?.message || err);
-  }
+function persistState(): void {
+  // Fire-and-forget: the store never throws, it logs internally.
+  void snapshotStore.save(JSON.stringify(storage.toJSON()));
 }
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -50,7 +46,7 @@ async function startServer() {
   const app = express();
 
   // Restore persisted state before serving any requests.
-  restoreState();
+  await restoreState();
 
   // Persist every 60s and on graceful shutdown.
   const persistTimer = setInterval(persistState, 60_000);
