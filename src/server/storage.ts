@@ -471,6 +471,49 @@ export class StorageEngine {
   }
 
   // ==========================================================================
+  // FILE PERSISTENCE — JSON snapshot of the whole store.
+  // Path defaults to ./arcadia-data.json, overridable via ARCADIA_DATA_FILE.
+  // The server loads on boot (if the file exists) and saves periodically +
+  // on shutdown. NOTE: on Cloud Run the filesystem is ephemeral per instance,
+  // so this guards against process restarts, not instance replacement — a
+  // managed database is still the right call for production-critical data.
+  // ==========================================================================
+  toJSON(): Record<string, unknown> {
+    const out: Record<string, unknown> = { version: 1, savedAt: new Date().toISOString() };
+    const self = this as unknown as Record<string, unknown>;
+    for (const field of StorageEngine.SNAPSHOT_FIELDS) {
+      const value = self[field];
+      if (value instanceof Map) {
+        out[field] = Array.from(value.entries());
+      } else if (Array.isArray(value)) {
+        out[field] = value;
+      }
+    }
+    return out;
+  }
+
+  loadJSON(data: Record<string, unknown>): void {
+    const self = this as unknown as Record<string, unknown>;
+    for (const field of StorageEngine.SNAPSHOT_FIELDS) {
+      const value = data[field];
+      if (!Array.isArray(value)) continue;
+      const current = self[field];
+      if (current instanceof Map) {
+        // Map fields were serialized as [key, value] entry arrays.
+        if (value.length === 0 || Array.isArray(value[0])) {
+          self[field] = new Map(value as [string, unknown][]);
+        }
+      } else if (Array.isArray(current)) {
+        self[field] = value;
+      }
+    }
+  }
+
+  // NOTE: file I/O helpers (save/load the JSON above to disk) live in
+  // server.ts, which is only ever bundled for Node. storage.ts is also
+  // imported by browser components, so it must stay free of node: imports.
+
+  // ==========================================================================
   // IDENTITY & ORGANIZATION (Tenant Boundary)
   // ==========================================================================
 

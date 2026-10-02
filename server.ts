@@ -5,15 +5,63 @@
 
 import express from 'express';
 import path from 'path';
+import fs from 'node:fs';
+import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './src/server/api.ts';
 import { correlationAndAuthMiddleware } from './src/server/auth.ts';
+import { storage } from './src/server/storage.ts';
+
+// Load local .env if present (no-op when real env vars are injected,
+// e.g. AI Studio secrets — dotenv never overrides existing values).
+dotenv.config();
+
+// ---------------------------------------------------------------------------
+// File persistence: the in-memory store is snapshotted to disk periodically
+// and on shutdown, and restored on boot when a snapshot exists.
+// NOTE: on Cloud Run the filesystem is ephemeral per instance, so this
+// protects against process restarts, not instance replacement. A managed
+// database remains the right choice for production-critical data.
+// ---------------------------------------------------------------------------
+const DATA_FILE = process.env.ARCADIA_DATA_FILE || path.join(process.cwd(), 'arcadia-data.json');
+
+function persistState(): void {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(storage.toJSON()));
+  } catch (err) {
+    console.error(`[STORAGE] Failed to persist state to ${DATA_FILE}:`, (err as Error)?.message || err);
+  }
+}
+
+function restoreState(): void {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return;
+    storage.loadJSON(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) as Record<string, unknown>);
+    console.log(`[STORAGE] Restored persisted state from ${DATA_FILE}.`);
+  } catch (err) {
+    console.error(`[STORAGE] Failed to restore ${DATA_FILE} — starting from seed data:`, (err as Error)?.message || err);
+  }
+}
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
 async function startServer() {
   const app = express();
+
+  // Restore persisted state before serving any requests.
+  restoreState();
+
+  // Persist every 60s and on graceful shutdown.
+  const persistTimer = setInterval(persistState, 60_000);
+  persistTimer.unref?.();
+  const shutdown = (signal: string) => {
+    console.log(`[ARCADIA] Received ${signal} — persisting state and exiting.`);
+    persistState();
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 
   // Core Request Parsers
   app.use(express.json());
