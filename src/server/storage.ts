@@ -2436,6 +2436,23 @@ export class StorageEngine {
   // ==========================================================================
 
   private seedDevelopmentData(): void {
+    this.seedEssentialData();
+    // Demo content (sample project, requirements, tasks, findings...) is only
+    // seeded when explicitly enabled, or by default outside production.
+    // Production boots clean: organization + personnel only.
+    const flag = process.env.ARCADIA_SEED_DEMO_DATA;
+    const seedDemo = flag !== undefined
+      ? flag.toLowerCase() !== 'false'
+      : process.env.NODE_ENV !== 'production';
+    if (seedDemo) {
+      this.seedDemoContent();
+    } else {
+      console.log('[STORAGE] Demo content seeding skipped — essential organization + personnel only.');
+    }
+  }
+
+  /** Organization + personnel. Always seeded: login depends on these. */
+  private seedEssentialData(): void {
     const orgId = 'org-arcadia-demo';
     const org: Organization = {
       id: orgId,
@@ -2456,7 +2473,11 @@ export class StorageEngine {
     ];
 
     demoUsers.forEach(u => this.users.set(u.id, u));
+  }
 
+  /** Sample project and all associated demo content. Skipped in production. */
+  private seedDemoContent(): void {
+    const orgId = 'org-arcadia-demo';
     // Authoritative Enterprise Project
     const projId = 'proj-core-os';
     const project: Project = {

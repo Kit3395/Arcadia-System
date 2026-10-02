@@ -96,7 +96,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
-        {/* Live RBAC Role Switcher */}
+        {/* Live RBAC Role Switcher (admin roles only — mirrors server's admin.config gate) */}
+        {['PROJECT_LEAD', 'SECURITY', 'OPERATIONS'].includes(user?.role || '') && (
         <div className="flex items-center space-x-2 pl-2 border-l border-slate-800">
           <Users className="w-4 h-4 text-slate-500" />
           <div className="flex flex-col">
@@ -114,9 +115,10 @@ export const Header: React.FC<HeaderProps> = ({
             </select>
           </div>
         </div>
+        )}
 
-        {/* Emergency Full-System Lockdown */}
-        {onLockdown && (
+        {/* Emergency Full-System Lockdown (admin roles only) */}
+        {onLockdown && ['PROJECT_LEAD', 'SECURITY', 'OPERATIONS'].includes(user?.role || '') && (
           <button
             onClick={onLockdown}
             title="Enact Full System Lockdown (Revokes all active sessions immediately)"
